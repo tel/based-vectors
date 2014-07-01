@@ -1,0 +1,23 @@
+name:                based-vectors
+version:             0.1.0.0
+synopsis:            Efficient vector spaces with arbitrary bases
+homepage:            http://github.com/tel/based-vectors
+license:             BSD3
+license-file:        LICENSE
+author:              Joseph T. Abrahamson
+maintainer:          me@jspha.com
+copyright:           Copyright (c) 2014 Joseph T. Abrahamson
+category:            Math
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  exposed-modules:
+    Data.Vector.Based
+    Data.Vector.Based.Codensity
+  build-depends:
+      base         >= 4.7 && < 4.8
+    , containers   >= 0.5 && < 0.6
+    , vector-space >= 0.8 && < 0.9
+  hs-source-dirs:      src
+  default-language:    Haskell2010
