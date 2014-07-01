@@ -1,3 +1,7 @@
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving  #-}
 
 -- |
 -- Module      :  Data.Vector.Based
@@ -5,6 +9,7 @@
 -- License     :  BSD3
 -- Maintainer  :  Joseph T. Abrahamson <me@jspha.com>
 -- Stability   :  experimental
+-- Portability :  GADTs
 --
 -- A vector space is represented by a set of linearly independent
 -- basis vectors. Normally, if you treat a list or array as a vector
@@ -33,4 +38,86 @@
 
 module Data.Vector.Based where
 
+import           Control.Applicative
+import           Control.Monad
+import           Data.Map            (Map)
+import qualified Data.Map            as Map
+
+newtype Vect_ s b = Vect_ { unVect_ :: Map b s }
+
+returnV :: Num s => b -> Map b s
+returnV a = Map.singleton a 1
+
+joinV :: (Num s, Ord b) => Map (Map b s) s -> Map b s
+joinV = Map.unionsWith (+)
+      . map (\(m, v) -> fmap (v *) m)
+      . Map.toList
+
+(>>>)
+  :: (Ord b, Ord s, Num s) =>
+     (t -> Map k1 s) -> (k1 -> Map b s) -> t -> Map b s
+f >>> g = \a -> f a >>- g
+
+(>>-)
+  :: (Ord s, Ord b, Num s) => Map k1 s -> (k1 -> Map b s) -> Map b s
+m >>- f = (joinV (Map.mapKeys f m))
+
+data K s a b = K { appK :: a -> Map b s }
+
+data Vect s b where
+  Vect  :: Map x s -> TList (K s) x b -> Vect s b
+  -- This basically ruins it
+  Vect1 :: Vect s b -> (b -> Vect s c) -> Vect s c
+
+concatTs :: (TSequence seq, Num s, Ord s, Ord b)
+         => seq (K s) a b -> K s a b
+concatTs x = case tviewl x of
+  TEmptyL -> K returnV
+  k :< ks -> K (appK k >>> appK (concatTs ks))
+
+inj :: Map b s -> Vect s b
+inj m = Vect m Nil
+
+prj :: (Num s, Ord s, Ord b) => Vect s b -> Map b s
+prj (Vect m0 x) = m0 >>- appK (concatTs x)
+
+instance Num s => Functor (Vect s) where
+  fmap = liftM
+
+instance Num s => Applicative (Vect s) where
+  pure  = return
+  (<*>) = ap
+
+instance Num s => Monad (Vect s) where
+  return  = inj . returnV
+  v >>= f = Vect1 v f
+
+-- Map x s -> TList (K s) x a -> (a -> Vect s b) -> Vect s b
+
+--------------------------------------------------------------------------------
+
+data TViewl s c x y where
+  TEmptyL :: TViewl s c x x
+  (:<)    :: c x y -> s c y z -> TViewl s c x z
+
+class TSequence s where
+  tempty     :: s c x x
+  tsingleton :: c x y -> s c x y
+  (><)       :: s c x y -> s c y z -> s c x z
+  tviewl     :: s c x y -> TViewl s c x y
+
+-- | Not the most efficient, but it'll do for initial implementation.
+-- Later this can be swapped out.
+infixr 5 :-
+data TList c x y where
+  Nil  :: TList c x x
+  (:-) :: c x y -> TList c y z -> TList c x z
+
+instance TSequence TList where
+  tempty = Nil
+  tsingleton cxy = cxy :- Nil
+  Nil      >< t  = t
+  (t :- c) >< t' = t :- (c >< t')
+  tviewl Nil      = TEmptyL
+  tviewl (t :- c) = t :< c
 
