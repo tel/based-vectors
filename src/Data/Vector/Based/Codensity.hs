@@ -1,5 +1,6 @@
-{-# LANGUAGE RankNTypes   #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RankNTypes      #-}
+{-# LANGUAGE TypeFamilies    #-}
 
 -- |
 -- Module      :  Data.Vector.Based.Codensity
@@ -23,13 +24,18 @@
 -- * http://vimeo.com/6590617
 --
 -- The standard mechanism to make convenient, efficient arbitrary
--- basis vectors would be to transform them using the Codensity monad.
--- This allows vectors to be manipulated by standard monadic and
--- applicative combinators.
+-- basis vectors would be to transform them using the @Codensity@
+-- monad. This allows vectors to be manipulated by standard monadic
+-- and applicative combinators.
 --
--- These Codensity transformed vectors can be expensive to examine
+-- These @Codensity@ transformed vectors can be expensive to examine
 -- intermediate values and thus are produced here as a reference
 -- implementation.
+--
+-- In this implementation, we could replace the 'Num' constraint with
+-- a suitable ring class and even end up defining left or right
+-- modules over a ring. If this is desirable, then a suitable
+-- @newtype@ could be used along with a partial 'Num' instance.
 
 module Data.Vector.Based.Codensity (
   Vect
@@ -44,67 +50,80 @@ import qualified Data.Map            as Map
 import           Data.Maybe          (fromMaybe)
 import           Data.VectorSpace
 
-returnV :: a -> Map a Int
+type Vectable s b = (Num s, Ord s, Ord b)
+
+returnV :: Num s => b -> Map b s
 returnV a = Map.singleton a 1
 
-joinV :: Ord s => Map (Map s Int) Int -> Map s Int
+joinV :: (Num s, Ord b) => Map (Map b s) s -> Map b s
 joinV = Map.unionsWith (+)
-      . map (\(m, v) -> fmap (*v) m)
+      . map (\(m, v) -> fmap (v *) m)
       . Map.toList
 
-bindV :: Ord b => Map a Int -> (a -> Map b Int) -> Map b Int
+bindV :: Vectable s b' => Map b s -> (b -> Map b' s) -> Map b' s
 bindV m f = joinV (Map.mapKeys f m)
 
-aVect :: Ord s => Map s Int -> Vect s
+aVect :: Vectable s b => Map b s -> Vect s b
 aVect x = Vect $ \inj mp -> fmap mp (bindV x inj)
 
-mapVect :: Ord s => Vect s -> Map s Int
+mapVect :: Vectable s b => Vect s b -> Map b s
 mapVect v = runVect v returnV id
 
-singleton :: Ord s => s -> Int -> Vect s
+singleton :: Vectable s b => b -> s -> Vect s b
 singleton s m = aVect (Map.singleton s m)
 
-mapField :: (Int -> Int) -> Vect s -> Vect s
+mapField :: (s -> s) -> Vect s b -> Vect s b
 mapField f v = Vect $ \k m -> runVect v k (f . m)
 
-newtype Vect a =
-  Vect { runVect :: forall s . Ord s => (a -> Map s Int) -> (Int -> Int) -> Map s Int }
+at :: Vectable s b => b -> Vect s b -> s
+at b v = fromMaybe 0 (Map.lookup b (mapVect v))
 
-instance Ord s => Eq (Vect s) where
+newtype Vect s a =
+  Vect { runVect :: forall b . Ord b => (a -> Map b s) -> (s -> s) -> Map b s }
+
+instance Vectable s b => Eq (Vect s b) where
   v == v' = mapVect v == mapVect v'
 
-instance (Show s, Ord s) => Show (Vect s) where
+instance (Show s, Show b, Vectable s b) => Show (Vect s b) where
   showsPrec p v = showsPrec p (mapVect v)
 
-instance Ord s => Ord (Vect s) where
+instance Vectable s b => Ord (Vect s b) where
   compare v v' = compare (mapVect v) (mapVect v')
 
-instance Functor Vect where
+instance Functor (Vect s) where
   fmap f v = Vect $ \k m -> runVect v (\a -> k (f a)) m
 
-instance Applicative Vect where
+instance Applicative (Vect s) where
   pure  = return
   (<*>) = ap
 
-instance Monad Vect where
+instance Monad (Vect s) where
   return a = Vect $ \k m -> k a
   z >>= f  = Vect $ \k m -> runVect z (\a -> runVect (f a) k m) m
 
-instance Ord s => AdditiveGroup (Vect s) where
+instance Vectable s b => AdditiveGroup (Vect s b) where
   zeroV   = aVect Map.empty
   negateV = mapField negate
 
   -- This is expensive!
   a ^+^ b = aVect (Map.mergeWithKey go id id (mapVect a) (mapVect b)) where
-    go :: s -> Int -> Int -> Maybe Int
     go _ a b = let r = a + b in if r == 0 then Nothing else Just r
 
-instance Ord s => VectorSpace (Vect s) where
-  type Scalar (Vect s) = Int
+instance Vectable s b => VectorSpace (Vect s b) where
+  type Scalar (Vect s b) = s
   s *^ v = mapField (s*) v
 
-instance Ord s => HasBasis (Vect s) where
-  type Basis (Vect s) = s
+instance Vectable s b => HasBasis (Vect s b) where
+  type Basis (Vect s b) = b
   basisValue     = flip singleton 1
   decompose      = Map.toList . mapVect
   decompose' v b = fromMaybe 0 (Map.lookup b (mapVect v))
+
+dot :: Vectable s b => Vect s b -> Vect s b -> s
+dot a b = at True (liftM2 (==) a b)
+
+class Universe a where
+  universe :: [a]
+
+codot :: (Universe b, Vectable s b) => Vect s (b, b)
+codot = aVect (Map.fromList (map (\a -> ((a,a), 1)) universe))
