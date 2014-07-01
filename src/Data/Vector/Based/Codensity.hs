@@ -32,10 +32,7 @@
 -- implementation.
 
 module Data.Vector.Based.Codensity (
-    Vect
-  , singleton
-  , aVect
-  , mapVect
+  Vect
   ) where
 
 import           Control.Applicative
@@ -72,6 +69,15 @@ mapField f v = Vect $ \k m -> runVect v k (f . m)
 
 newtype Vect a =
   Vect { runVect :: forall s . Ord s => (a -> Map s Int) -> (Int -> Int) -> Map s Int }
+
+instance Ord s => Eq (Vect s) where
+  v == v' = mapVect v == mapVect v'
+
+instance (Show s, Ord s) => Show (Vect s) where
+  showsPrec p v = showsPrec p (mapVect v)
+
+instance Ord s => Ord (Vect s) where
+  compare v v' = compare (mapVect v) (mapVect v')
 
 instance Functor Vect where
   fmap f v = Vect $ \k m -> runVect v (\a -> k (f a)) m
